@@ -29,20 +29,12 @@ Upload a PDF or image → get structured text output with full visualization das
 # Cell 1: Clone & Install
 !git clone https://github.com/Rahid-Khan/Fast-api-ocr.git /content/Fast-api-ocr
 !pip install -q -r /content/Fast-api-ocr/requirements.txt
-!pip install -q "Pillow>=11.0,<12.0" pyngrok
+!pip install -q "Pillow>=11.0,<12.0"
+!wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
+!chmod +x /usr/local/bin/cloudflared
 
-# Cell 2: Run Server
-import subprocess, time, threading
-from pyngrok import ngrok
-
-proc = subprocess.Popen(
-    ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8000'],
-    cwd='/content/Fast-api-ocr',
-    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
-)
-threading.Thread(target=lambda: [print(l, end='') for l in proc.stdout], daemon=True).start()
-time.sleep(3)
-print(f'Open: {ngrok.connect(8000).public_url}')
+# Cell 2: Run Server (uses cloudflared — free, no account needed)
+# Just run the cell, it will print a public URL
 ```
 
 5. Open the public URL → use the OCR dashboard with visualizations
