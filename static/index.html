@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>One-Shot Document Digitizer</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <h1>One-Shot Document Digitizer</h1>
+        <p class="subtitle">Upload a PDF or image — get structured text in a single AI inference pass</p>
+    </header>
+
+    <main>
+        <!-- GPU Warning Banner -->
+        <div id="gpu-warning" class="banner warning hidden"></div>
+
+        <!-- View: Upload -->
+        <section id="view-upload" class="view active">
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-zone-content">
+                    <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                    <p>Drag & drop a file here, or <label for="file-input" class="link">browse</label></p>
+                    <p class="hint">Supports PDF, JPG, PNG, BMP, TIFF, WebP (max 100 MB)</p>
+                </div>
+                <input type="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.tif,.webp" hidden>
+            </div>
+            <div id="file-preview" class="file-preview hidden">
+                <div class="file-info">
+                    <span id="file-name"></span>
+                    <span id="file-size" class="muted"></span>
+                    <button id="btn-remove" class="btn-small btn-danger">Remove</button>
+                </div>
+            </div>
+            <button id="btn-start" class="btn btn-primary" disabled>Start OCR</button>
+        </section>
+
+        <!-- View: Processing -->
+        <section id="view-processing" class="view">
+            <div class="processing-card">
+                <div class="spinner"></div>
+                <h2>Processing document...</h2>
+                <p id="processing-status">Uploading and initializing OCR engine</p>
+                <p class="muted">Job ID: <span id="job-id-display"></span></p>
+                <p class="muted">This may take a while on first run (model loading ~15-30s)</p>
+            </div>
+        </section>
+
+        <!-- View: Results -->
+        <section id="view-results" class="view">
+            <div class="results-header">
+                <h2>OCR Results</h2>
+                <div class="results-meta">
+                    <span id="result-filename"></span>
+                    <span id="result-pages" class="muted"></span>
+                    <span id="result-time" class="muted"></span>
+                </div>
+            </div>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="text">Plain Text</button>
+                <button class="tab" data-tab="markdown">Markdown</button>
+                <button class="tab" data-tab="json">JSON</button>
+            </div>
+
+            <div class="tab-content">
+                <div id="tab-text" class="tab-pane active">
+                    <div class="result-actions">
+                        <button class="btn-small" onclick="copyToClipboard('result-text')">Copy</button>
+                        <button class="btn-small" onclick="downloadResult('text')">Download .txt</button>
+                    </div>
+                    <pre id="result-text" class="result-output"></pre>
+                </div>
+                <div id="tab-markdown" class="tab-pane">
+                    <div class="result-actions">
+                        <button class="btn-small" onclick="copyToClipboard('result-markdown')">Copy</button>
+                        <button class="btn-small" onclick="downloadResult('markdown')">Download .md</button>
+                    </div>
+                    <pre id="result-markdown" class="result-output"></pre>
+                </div>
+                <div id="tab-json" class="tab-pane">
+                    <div class="result-actions">
+                        <button class="btn-small" onclick="copyToClipboard('result-json')">Copy</button>
+                        <button class="btn-small" onclick="downloadResult('json')">Download .json</button>
+                    </div>
+                    <pre id="result-json" class="result-output json-output"></pre>
+                </div>
+            </div>
+
+            <div class="results-footer">
+                <button id="btn-new" class="btn btn-primary">Upload Another</button>
+                <button id="btn-delete" class="btn btn-danger">Delete Job</button>
+            </div>
+
+            <!-- Job History -->
+            <div class="job-history">
+                <h3>Recent Jobs</h3>
+                <div id="job-list" class="job-list"></div>
+            </div>
+        </section>
+
+        <!-- View: Error -->
+        <section id="view-error" class="view">
+            <div class="error-card">
+                <h2>Processing Failed</h2>
+                <p id="error-message" class="error-text"></p>
+                <button id="btn-retry" class="btn btn-primary">Try Again</button>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Powered by Baidu Unlimited-OCR (3B params, MIT license)</p>
+    </footer>
+
+    <script src="/static/js/result-viewer.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
