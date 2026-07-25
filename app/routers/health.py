@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.models import HealthResponse, GpuStatus, EngineStats
+from app.models import HealthResponse, GpuStatus, EngineStats, ProgressResponse
 from app.ocr_engine import ocr_engine
 
 router = APIRouter()
@@ -22,3 +22,9 @@ async def gpu_status():
 @router.get("/stats", response_model=EngineStats)
 async def engine_stats():
     return EngineStats(**ocr_engine.stats)
+
+
+@router.get("/progress", response_model=ProgressResponse)
+async def engine_progress():
+    p = ocr_engine.progress
+    return ProgressResponse(**p)

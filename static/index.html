@@ -51,9 +51,12 @@
             <div class="processing-card">
                 <div class="spinner"></div>
                 <h2>Processing document...</h2>
+                <div class="progress-bar-track">
+                    <div id="progress-bar-fill" class="progress-bar-fill"></div>
+                </div>
                 <p id="processing-status">Uploading and initializing OCR engine</p>
                 <p class="muted">Job ID: <span id="job-id-display"></span></p>
-                <p class="muted">This may take a while on first run (model loading ~15-30s)</p>
+                <p class="muted">Model loads ~15-30s on first run. OCR runs on GPU.</p>
             </div>
         </section>
 

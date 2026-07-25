@@ -188,6 +188,23 @@ footer {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.progress-bar-track {
+    width: 100%;
+    max-width: 400px;
+    height: 8px;
+    background: var(--border-light);
+    border-radius: 4px;
+    margin: 1rem auto;
+    overflow: hidden;
+}
+.progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--primary), var(--info));
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
 /* Results */
 .results-header { margin-bottom: 1rem; }
 .results-header h2 { margin-bottom: 0.3rem; font-size: 1.3rem; }

@@ -63,3 +63,9 @@ class EngineStats(BaseModel):
     avg_time: float
     avg_chars: int
     history: list[dict]
+
+
+class ProgressResponse(BaseModel):
+    stage: str
+    detail: str
+    percent: int

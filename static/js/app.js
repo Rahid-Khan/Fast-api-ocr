@@ -1,5 +1,6 @@
 let currentJobId = null;
 let pollTimer = null;
+let progressTimer = null;
 let selectedFile = null;
 
 const API = '/api';
@@ -89,6 +90,7 @@ btnStart.addEventListener('click', async () => {
         document.getElementById('job-id-display').textContent = currentJobId;
         showView('processing');
         startPolling();
+        startProgressPolling();
     } catch (e) {
         alert('Upload failed: ' + e.message);
         btnStart.disabled = false;
@@ -96,7 +98,46 @@ btnStart.addEventListener('click', async () => {
     }
 });
 
-// Polling
+// Progress polling (real-time engine progress)
+function startProgressPolling() {
+    stopProgressPolling();
+    progressTimer = setInterval(pollProgress, 1000);
+    pollProgress();
+}
+
+function stopProgressPolling() {
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+}
+
+async function pollProgress() {
+    try {
+        const res = await fetch(API + '/progress');
+        const data = await res.json();
+        const statusEl = document.getElementById('processing-status');
+        const barFill = document.getElementById('progress-bar-fill');
+        const stageMap = {
+            'idle': 'Waiting...',
+            'loading_model': 'Loading model',
+            'model_ready': 'Model ready',
+            'converting': 'Converting document',
+            'inferring': 'Running OCR inference',
+            'decoding': 'Decoding results',
+            'done': 'Complete',
+            'error': 'Error',
+        };
+        const stageName = stageMap[data.stage] || data.stage;
+        if (data.detail) {
+            statusEl.textContent = `${stageName}: ${data.detail}`;
+        } else {
+            statusEl.textContent = stageName;
+        }
+        if (barFill && data.percent >= 0) {
+            barFill.style.width = data.percent + '%';
+        }
+    } catch (e) { /* ignore */ }
+}
+
+// Job status polling
 function startPolling() {
     stopPolling();
     pollTimer = setInterval(pollStatus, 2000);
@@ -105,6 +146,7 @@ function startPolling() {
 
 function stopPolling() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    stopProgressPolling();
 }
 
 async function pollStatus() {

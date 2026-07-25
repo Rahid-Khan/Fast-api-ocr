@@ -21,6 +21,15 @@ class OCREngine:
         self._total_infer_time = 0.0
         self._total_chars = 0
         self._history = []
+        self._progress = {"stage": "idle", "detail": "", "percent": 0}
+
+    @property
+    def progress(self):
+        return self._progress
+
+    def _update_progress(self, stage, detail="", percent=0):
+        self._progress = {"stage": stage, "detail": detail, "percent": percent}
+        print(f"[Progress] {stage}: {detail} ({percent}%)")
 
     def _check_memory(self):
         mem = psutil.virtual_memory()
@@ -28,8 +37,7 @@ class OCREngine:
         if self.device == "cpu" and available_gb < 6:
             raise MemoryError(
                 f"Insufficient RAM: {available_gb:.1f} GB available, "
-                f"at least 6 GB required for CPU inference. "
-                f"Close other applications or increase your page file size."
+                f"at least 6 GB required for CPU inference."
             )
         if self.device == "cuda":
             gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
@@ -51,11 +59,15 @@ class OCREngine:
             dtype = torch.float16
             os.environ.setdefault("PYTORCH_NO_CUDA_MEMORY_CACHING", "1")
 
-        print(f"[OCREngine] Loading model on {self.device} with {dtype}...")
+        self._update_progress("loading_model", "Downloading model weights...", 10)
         t0 = time.time()
+
+        self._update_progress("loading_model", "Loading tokenizer...", 20)
         self.tokenizer = AutoTokenizer.from_pretrained(
             settings.model_name, trust_remote_code=True
         )
+
+        self._update_progress("loading_model", "Loading model to memory...", 40)
         self.model = AutoModel.from_pretrained(
             settings.model_name,
             trust_remote_code=True,
@@ -63,11 +75,15 @@ class OCREngine:
             torch_dtype=dtype,
             low_cpu_mem_usage=True,
         )
+
         if self.device == "cuda":
+            self._update_progress("loading_model", "Moving model to GPU...", 70)
             self.model = self.model.cuda()
         self.model = self.model.eval()
+
         self._loaded = True
         self._load_time = time.time() - t0
+        self._update_progress("model_ready", f"Model loaded in {self._load_time:.1f}s", 100)
         print(f"[OCREngine] Model loaded in {self._load_time:.1f}s.")
 
     def infer_single(self, image_path: str, output_dir: str) -> dict:
@@ -75,28 +91,82 @@ class OCREngine:
             self.load_model()
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+            self._update_progress("converting", "Preparing image...", 10)
+
+            # Check image exists
+            if not Path(image_path).exists():
+                raise FileNotFoundError(f"Image not found: {image_path}")
+
+            img_size = Path(image_path).stat().st_size / 1024
+            self._update_progress("inferring", f"Running OCR on image ({img_size:.0f} KB)...", 30)
+
             t0 = time.time()
-            self.model.infer(
-                self.tokenizer,
-                prompt="<image>document parsing.",
-                image_file=image_path,
-                output_path=output_dir,
-                base_size=settings.base_size,
-                image_size=settings.image_size,
-                crop_mode=settings.crop_mode,
-                max_length=settings.max_length,
-                no_repeat_ngram_size=35,
-                ngram_window=128,
-                save_results=True,
-            )
+
+            # Try to capture the model's return value (it may return text directly)
+            result_text = None
+            try:
+                result_text = self.model.infer(
+                    self.tokenizer,
+                    prompt="<image>document parsing.",
+                    image_file=image_path,
+                    output_path=output_dir,
+                    base_size=settings.base_size,
+                    image_size=settings.image_size,
+                    crop_mode=settings.crop_mode,
+                    max_length=settings.max_length,
+                    no_repeat_ngram_size=35,
+                    ngram_window=128,
+                    save_results=True,
+                )
+            except TypeError as e:
+                # Some versions don't return text
+                print(f"[OCREngine] infer() returned no text (TypeError: {e}), reading output files")
+                self.model.infer(
+                    self.tokenizer,
+                    prompt="<image>document parsing.",
+                    image_file=image_path,
+                    output_path=output_dir,
+                    base_size=settings.base_size,
+                    image_size=settings.image_size,
+                    crop_mode=settings.crop_mode,
+                    max_length=settings.max_length,
+                    no_repeat_ngram_size=35,
+                    ngram_window=128,
+                    save_results=True,
+                )
+
             self._last_infer_time = time.time() - t0
             self._track_gpu_mem()
+            self._update_progress("decoding", "Reading output files...", 80)
 
+            # Read output files
             result = self._read_outputs(output_dir)
+
+            # If no files found, use the direct return value
+            if not result["text"] and result_text:
+                text = str(result_text).strip()
+                if text:
+                    result["text"] = text
+                    result["markdown"] = text
+                    result["json"] = text
+                    print(f"[OCREngine] Used direct model output ({len(text)} chars)")
+
+            # Final fallback: if still nothing, try reading raw model output
+            if not result["text"]:
+                result["text"] = "(no text output - model produced no results for this image)"
+                result["markdown"] = result["text"]
+                result["json"] = result["text"]
+
             char_count = len(result.get("text") or "")
             self._record_job("single", 1, char_count)
+            self._update_progress("done", f"Extracted {char_count} characters", 100)
+
+            print(f"[OCREngine] Single OCR complete: {char_count} chars in {self._last_infer_time:.1f}s")
+            print(f"[OCREngine] Output dir contents: {list(Path(output_dir).iterdir())}")
+
             return result
         except (MemoryError, torch.cuda.OutOfMemoryError) as e:
+            self._update_progress("error", str(e), 0)
             self._unload_model()
             raise RuntimeError(
                 f"Out of memory during inference: {e}. "
@@ -108,23 +178,78 @@ class OCREngine:
             self.load_model()
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+            self._update_progress("converting", f"Preparing {len(image_paths)} pages...", 10)
+
+            # Validate all images exist
+            for p in image_paths:
+                if not Path(p).exists():
+                    raise FileNotFoundError(f"Image not found: {p}")
+
+            total_size = sum(Path(p).stat().st_size for p in image_paths) / 1024
+            self._update_progress("inferring", f"Running multi-page OCR ({len(image_paths)} pages, {total_size:.0f} KB)...", 30)
+
             t0 = time.time()
-            self.model.infer_multi(
-                self.tokenizer,
-                prompt="<image>Multi page parsing.",
-                image_files=image_paths,
-                output_path=output_dir,
-                image_size=settings.multi_image_size,
-                max_length=settings.max_length,
-            )
+
+            # Try to capture the model's return value
+            result_text = None
+            try:
+                result_text = self.model.infer_multi(
+                    self.tokenizer,
+                    prompt="<image>Multi page parsing.",
+                    image_files=image_paths,
+                    output_path=output_dir,
+                    image_size=settings.multi_image_size,
+                    max_length=settings.max_length,
+                    no_repeat_ngram_size=35,
+                    ngram_window=1024,
+                    save_results=True,
+                )
+            except TypeError as e:
+                print(f"[OCREngine] infer_multi() returned no text (TypeError: {e}), reading output files")
+                self.model.infer_multi(
+                    self.tokenizer,
+                    prompt="<image>Multi page parsing.",
+                    image_files=image_paths,
+                    output_path=output_dir,
+                    image_size=settings.multi_image_size,
+                    max_length=settings.max_length,
+                    no_repeat_ngram_size=35,
+                    ngram_window=1024,
+                    save_results=True,
+                )
+
             self._last_infer_time = time.time() - t0
             self._track_gpu_mem()
+            self._update_progress("decoding", "Reading output files...", 80)
 
+            # Read output files
             result = self._read_outputs(output_dir)
+
+            # If no files found, use the direct return value
+            if not result["text"] and result_text:
+                text = str(result_text).strip()
+                if text:
+                    result["text"] = text
+                    result["markdown"] = text
+                    result["json"] = text
+                    print(f"[OCREngine] Used direct model output ({len(text)} chars)")
+
+            # Final fallback
+            if not result["text"]:
+                result["text"] = "(no text output - model produced no results for these pages)"
+                result["markdown"] = result["text"]
+                result["json"] = result["text"]
+
             char_count = len(result.get("text") or "")
             self._record_job("pdf", len(image_paths), char_count)
+            self._update_progress("done", f"Extracted {char_count} characters from {len(image_paths)} pages", 100)
+
+            print(f"[OCREngine] Multi OCR complete: {char_count} chars from {len(image_paths)} pages in {self._last_infer_time:.1f}s")
+            print(f"[OCREngine] Output dir contents: {list(Path(output_dir).iterdir())}")
+
             return result
         except (MemoryError, torch.cuda.OutOfMemoryError) as e:
+            self._update_progress("error", str(e), 0)
             self._unload_model()
             raise RuntimeError(
                 f"Out of memory during inference: {e}. "
@@ -166,17 +291,27 @@ class OCREngine:
         result = {"text": None, "markdown": None, "json": None}
 
         if not out.exists():
+            print(f"[OCREngine] Output dir does not exist: {out}")
             return result
 
-        for f in out.iterdir():
-            if f.suffix == ".txt":
-                result["text"] = f.read_text(encoding="utf-8")
-            elif f.suffix == ".md":
-                result["markdown"] = f.read_text(encoding="utf-8")
-            elif f.suffix == ".json":
-                result["json"] = f.read_text(encoding="utf-8")
+        files = list(out.iterdir())
+        print(f"[OCREngine] Output dir files: {[f.name for f in files]}")
 
-        base = result["text"] or result["markdown"] or ""
+        for f in files:
+            if f.is_file():
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    if f.suffix == ".txt":
+                        result["text"] = content
+                    elif f.suffix == ".md":
+                        result["markdown"] = content
+                    elif f.suffix == ".json":
+                        result["json"] = content
+                except Exception as e:
+                    print(f"[OCREngine] Error reading {f}: {e}")
+
+        # Fill missing formats from whatever we have
+        base = result["text"] or result["markdown"] or result["json"] or ""
         if not result["text"]:
             result["text"] = base
         if not result["markdown"]:
@@ -207,13 +342,11 @@ class OCREngine:
             avail = info["ram_available_gb"]
             if avail < 6:
                 info["warning"] = (
-                    f"Low RAM: {avail} GB available. At least 6 GB needed for CPU inference. "
-                    f"Close other applications or increase your page file size."
+                    f"Low RAM: {avail} GB available. At least 6 GB needed for CPU inference."
                 )
             else:
                 info["warning"] = (
-                    "No CUDA GPU detected. Running on CPU — inference will be 10-50x slower. "
-                    f"You have {avail} GB RAM available."
+                    "No CUDA GPU detected. Running on CPU — inference will be 10-50x slower."
                 )
         return info
 
