@@ -29,34 +29,149 @@ Extracted text with tabbed output (Plain Text, Markdown, JSON), copy/download ac
 - **GPU-accelerated** with automatic CPU fallback + performance warning
 - **Real-time visualization dashboard**: GPU/VRAM/RAM monitors, inference timing charts, job history
 - **Live progress tracking**: See model loading, image conversion, inference, and decoding stages in real time
+- **Progressive streaming output**: Watch text appear in real-time as the model extracts it
 - **Simple web UI**: Drag-and-drop upload, live progress bar, tabbed result viewer
-- **Google Colab ready**: One-click setup with T4 GPU acceleration via cloudflared tunnel (no account needed)
+- **Unlimited free usage**: Run as many OCR jobs as you want via Google Colab (free T4 GPU)
 
 ---
 
-## Quick Start
+## Run Unlimited OCR for Free via Google Colab
 
-### Option 1: Google Colab (Recommended)
+This project is designed to run **unlimited times** for free using Google Colab's free T4 GPU. Here's exactly how it works:
 
-1. Open [Google Colab](https://colab.research.google.com)
-2. Upload `Fast_api_OCR_Colab.ipynb` or create a new notebook
-3. **Runtime > Change runtime type > T4 GPU**
-4. Run all cells top to bottom
-5. Open the printed `*.trycloudflare.com` URL to use the OCR dashboard
+### What You Get
 
-```python
-# Cell 1: Clone & Install
-!git clone https://github.com/Rahid-Khan/Fast-api-ocr.git /content/Fast-api-ocr
-!pip install -q -r /content/Fast-api-ocr/requirements.txt
-!pip install -q "Pillow>=11.0,<12.0"
-!wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
-!chmod +x /usr/local/bin/cloudflared
+| Resource | Details |
+|----------|---------|
+| **GPU** | NVIDIA T4 (15 GB VRAM) — free on Colab |
+| **RAM** | ~12 GB — free on Colab |
+| **Cost** | $0 — completely free |
+| **Usage limit** | Unlimited — upload as many documents as you want |
+| **Model** | Baidu Unlimited-OCR (3B params) stays loaded in GPU after first upload |
 
-# Cell 2: Run Server (uses cloudflared — free, no account needed)
-# Just run the cell, it will print a public URL
+### How It Works (Step by Step)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  YOUR BROWSER                                                   │
+│  (any device — phone, laptop, tablet)                           │
+│                                                                 │
+│  Opens public URL from cloudflared                              │
+│  → Upload documents                                             │
+│  → See progressive text extraction in real-time                 │
+│  → Download results                                             │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           │ HTTPS (via cloudflared tunnel)
+                           │
+┌──────────────────────────▼──────────────────────────────────────┐
+│  GOOGLE COLAB (Free T4 GPU)                                     │
+│                                                                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │  FastAPI      │◄──│  OCR Engine   │◄──│  Unlimited-OCR   │  │
+│  │  (port 8000) │    │  (tracks      │    │  (3B params on   │  │
+│  │              │    │   progress)   │    │   GPU)           │  │
+│  └──────────────┘    └──────────────┘    └──────────────────┘  │
+│                                                                 │
+│  cloudflared creates a public URL (no account needed)           │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Option 2: Local Installation
+### Step 1: Open Google Colab
+
+1. Go to [https://colab.research.google.com](https://colab.research.google.com)
+2. Click **File → Upload notebook**
+3. Upload `Fast_api_OCR_Colab.ipynb` from this repository
+
+### Step 2: Enable GPU (Required)
+
+1. Click **Runtime → Change runtime type**
+2. Set **Hardware accelerator** to **T4 GPU**
+3. Click **Save**
+
+> Without GPU, the model runs on CPU which is 10-50x slower. GPU is essential.
+
+### Step 3: Run Cell 1 — Clone & Install (~2 minutes)
+
+Click the play button on Cell 1. This will:
+
+```
+1. Clone the repository from GitHub
+2. Install Python dependencies (torch, transformers, Pillow, etc.)
+3. Download cloudflared binary (free tunnel from Cloudflare)
+```
+
+You'll see `Done` when installation completes.
+
+### Step 4: Run Cell 2 — Start Server (~1 minute)
+
+Click the play button on Cell 2. This will:
+
+```
+1. Start the FastAPI web server on port 8000
+2. Launch cloudflared tunnel — creates a public URL
+3. Print a URL like: https://abc-xyz.trycloudflare.com
+```
+
+**Copy that URL** and open it in your browser. You'll see the OCR web dashboard.
+
+### Step 5: Upload Documents (Unlimited)
+
+Now you can use the OCR **unlimited times**:
+
+1. **Drag & drop** a PDF or image onto the upload zone
+2. Watch the **split-view** — document preview on left, text appearing on right
+3. See the **progress ring** fill as the model processes
+4. View results in **Plain Text / Markdown / JSON** tabs
+5. **Copy** or **Download** the extracted text
+6. Click **"Upload Another"** to process more documents
+
+**The model stays loaded in GPU memory** — after the first upload, subsequent documents process much faster (no 30-second model load each time).
+
+### Step 6: Use the Dashboard
+
+Click **"System Dashboard"** to see:
+
+- **GPU status**: Device name, VRAM usage, CUDA version
+- **RAM usage**: System memory allocation
+- **Statistics**: Total jobs, characters extracted, average inference time
+- **Job history chart**: Bar chart of all processed documents
+- **GPU memory ring**: Donut chart of VRAM allocation
+
+### Step 7: Stop When Done
+
+Run Cell 3 to stop the server and free GPU resources.
+
+---
+
+### What Happens If Colab Disconnects?
+
+Google Colab may disconnect after ~90 minutes of inactivity. When this happens:
+
+1. **Your results are safe** — the output files are still in the Colab runtime
+2. **Re-run Cell 2** to restart the server
+3. **Re-run Cell 1** only if the runtime was reset (you'll see import errors)
+
+If the runtime was fully reset (all variables cleared):
+1. Re-run Cell 1 (install)
+2. Re-run Cell 2 (server)
+3. The model will reload (~30 seconds first time)
+
+### Colab Usage Tips
+
+| Tip | Why |
+|-----|-----|
+| **Keep the tab open** | Prevents idle disconnect |
+| **Upload small files first** | Tests that everything works before large PDFs |
+| **Use PDF for multi-page docs** | Preserves page order and cross-page context |
+| **Check the dashboard** | Monitor GPU memory to avoid out-of-memory errors |
+| **Download results** | Save extracted text before Colab disconnects |
+
+---
+
+## Local Installation (Alternative)
+
+If you have a GPU on your own machine:
 
 ```bash
 git clone https://github.com/Rahid-Khan/Fast-api-ocr.git
@@ -91,11 +206,12 @@ Upload → Parse File → Convert PDF to Images (PyMuPDF) → GPU Inference (Unl
 3. **Convert**: PDFs are rendered to PNG images at 200 DPI using PyMuPDF
 4. **Infer**: Images are processed by the 3B-parameter model on GPU in a single pass
 5. **Decode**: Model output is saved as .txt, .md, and .json files
-6. **Display**: Results appear in a tabbed viewer with copy/download actions
+6. **Stream**: Text appears progressively in the UI via Server-Sent Events
+7. **Display**: Final results appear in a tabbed viewer with copy/download actions
 
 ### Real-Time Progress
 
-The processing view shows a live progress bar with stage indicators:
+The processing view shows a live progress ring and split-view:
 
 | Stage | Description |
 |-------|-------------|
@@ -104,7 +220,15 @@ The processing view shows a live progress bar with stage indicators:
 | `converting` | Rendering PDF pages to images |
 | `inferring` | Running OCR inference on GPU |
 | `decoding` | Reading output files from disk |
-| `done` | Results ready |
+| `done` | Results ready — text streams into the output panel |
+
+### Progressive Streaming
+
+Text is streamed character-by-character via Server-Sent Events (SSE):
+- **Left panel**: Original document preview
+- **Right panel**: Extracted text appearing in real-time with blinking cursor
+- **Progress ring**: SVG ring fills as processing advances
+- **Character counter**: Live count of extracted characters
 
 ---
 
@@ -134,11 +258,13 @@ Click the **"System Dashboard"** button in the web UI to see:
 | GET | `/api/health` | App status and GPU info |
 | GET | `/api/gpu-status` | GPU detection details |
 | GET | `/api/stats` | Engine statistics and job history |
-| GET | `/api/progress` | Real-time processing progress |
+| GET | `/api/progress` | Real-time processing progress (polling) |
+| GET | `/api/progress/stream` | Real-time processing progress (SSE) |
 | POST | `/api/upload` | Upload PDF/image, start OCR |
 | GET | `/api/jobs` | List all jobs |
 | GET | `/api/jobs/{id}` | Get full results (text/md/json) |
 | GET | `/api/jobs/{id}/status` | Poll job status |
+| GET | `/api/jobs/{id}/stream` | Stream OCR output progressively (SSE) |
 | DELETE | `/api/jobs/{id}` | Delete job and files |
 
 ---
@@ -167,22 +293,21 @@ Fast-api-ocr/
 │   ├── config.py             # Settings and paths
 │   ├── database.py           # SQLite job storage
 │   ├── models.py             # Pydantic schemas
-│   ├── ocr_engine.py         # Model loading, inference, progress tracking, stats
+│   ├── ocr_engine.py         # Model loading, inference, progress tracking, streaming
 │   ├── pdf_converter.py      # PDF to image conversion (PyMuPDF)
 │   ├── job_manager.py        # Job lifecycle management
 │   └── routers/
-│       ├── health.py         # Health, GPU status, stats, progress endpoints
+│       ├── health.py         # Health, GPU status, stats, progress SSE endpoints
 │       ├── upload.py         # File upload endpoint
-│       └── jobs.py           # Job management endpoints
+│       └── jobs.py           # Job management + streaming SSE endpoint
 ├── static/
-│   ├── index.html            # Single-page frontend
-│   ├── css/style.css         # White theme + dashboard styles
-│   ├── js/app.js             # Core logic + progress polling + dashboard
+│   ├── index.html            # Single-page frontend with split-view
+│   ├── css/style.css         # White theme + dashboard + streaming styles
+│   ├── js/app.js             # Core logic + SSE streaming + typewriter effect
 │   ├── js/result-viewer.js   # Tabbed output display
 │   └── js/visualization.js   # Canvas-based dashboard (GPU ring, history chart)
 ├── pictures/                 # Screenshots for README
 ├── Fast_api_OCR_Colab.ipynb  # Google Colab launcher (3 cells)
-├── colab_ocr.ipynb           # Alternative Colab notebook
 ├── requirements.txt          # Python dependencies
 └── README.md
 ```
@@ -196,11 +321,12 @@ Fast-api-ocr/
 | **OCR Model** | Baidu Unlimited-OCR (3B params, MIT license) |
 | **ML Framework** | PyTorch + Transformers (Hugging Face) |
 | **Backend** | FastAPI + Uvicorn |
+| **Streaming** | Server-Sent Events (SSE) for real-time progress + text output |
 | **Database** | SQLite (job storage) |
 | **PDF Processing** | PyMuPDF (fitz) |
 | **Frontend** | Vanilla HTML/CSS/JS (no frameworks) |
 | **Visualization** | HTML5 Canvas (no charting libraries) |
-| **Tunnel** | Cloudflare cloudflared (Colab) |
+| **Tunnel** | Cloudflare cloudflared (free, no account needed) |
 | **GPU** | NVIDIA CUDA (T4 recommended) |
 
 ---
@@ -260,6 +386,7 @@ Then update `app/ocr_engine.py` to call the SGLang OpenAI-compatible endpoint in
 - Training data composition and language coverage undisclosed
 - All accuracy/robustness claims should be verified on your own labeled samples
 - Model weights are ~6 GB; first load takes 15-30 seconds
+- Colab may disconnect after ~90 minutes of inactivity
 - Multi-page PDF inference uses the "base" config (image_size=1024), single images support "gundam" config (image_size=640)
 
 ---
