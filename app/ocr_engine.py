@@ -1,5 +1,6 @@
 import gc
 import os
+import time
 import torch
 import psutil
 from pathlib import Path
@@ -13,6 +14,13 @@ class OCREngine:
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self._loaded = False
+        self._load_time = 0.0
+        self._last_infer_time = 0.0
+        self._last_gpu_mem_used = 0.0
+        self._total_jobs = 0
+        self._total_infer_time = 0.0
+        self._total_chars = 0
+        self._history = []
 
     def _check_memory(self):
         mem = psutil.virtual_memory()
@@ -24,7 +32,7 @@ class OCREngine:
                 f"Close other applications or increase your page file size."
             )
         if self.device == "cuda":
-            gpu_mem = torch.cuda.get_device_properties(0).total_mem / (1024 ** 3)
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             if gpu_mem < 4:
                 raise MemoryError(
                     f"Insufficient GPU VRAM: {gpu_mem:.1f} GB, "
@@ -37,15 +45,14 @@ class OCREngine:
 
         self._check_memory()
 
-        # Use float16 on CPU to halve memory (3B * 2 bytes = ~6GB instead of ~12GB)
         if self.device == "cuda":
             dtype = torch.bfloat16
         else:
             dtype = torch.float16
-            # Force low memory usage on CPU
             os.environ.setdefault("PYTORCH_NO_CUDA_MEMORY_CACHING", "1")
 
         print(f"[OCREngine] Loading model on {self.device} with {dtype}...")
+        t0 = time.time()
         self.tokenizer = AutoTokenizer.from_pretrained(
             settings.model_name, trust_remote_code=True
         )
@@ -60,13 +67,15 @@ class OCREngine:
             self.model = self.model.cuda()
         self.model = self.model.eval()
         self._loaded = True
-        print("[OCREngine] Model loaded successfully.")
+        self._load_time = time.time() - t0
+        print(f"[OCREngine] Model loaded in {self._load_time:.1f}s.")
 
     def infer_single(self, image_path: str, output_dir: str) -> dict:
         try:
             self.load_model()
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+            t0 = time.time()
             self.model.infer(
                 self.tokenizer,
                 prompt="<image>document parsing.",
@@ -80,7 +89,13 @@ class OCREngine:
                 ngram_window=128,
                 save_results=True,
             )
-            return self._read_outputs(output_dir)
+            self._last_infer_time = time.time() - t0
+            self._track_gpu_mem()
+
+            result = self._read_outputs(output_dir)
+            char_count = len(result.get("text") or "")
+            self._record_job("single", 1, char_count)
+            return result
         except (MemoryError, torch.cuda.OutOfMemoryError) as e:
             self._unload_model()
             raise RuntimeError(
@@ -93,6 +108,7 @@ class OCREngine:
             self.load_model()
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+            t0 = time.time()
             self.model.infer_multi(
                 self.tokenizer,
                 prompt="<image>Multi page parsing.",
@@ -101,13 +117,36 @@ class OCREngine:
                 image_size=settings.multi_image_size,
                 max_length=settings.max_length,
             )
-            return self._read_outputs(output_dir)
+            self._last_infer_time = time.time() - t0
+            self._track_gpu_mem()
+
+            result = self._read_outputs(output_dir)
+            char_count = len(result.get("text") or "")
+            self._record_job("pdf", len(image_paths), char_count)
+            return result
         except (MemoryError, torch.cuda.OutOfMemoryError) as e:
             self._unload_model()
             raise RuntimeError(
                 f"Out of memory during inference: {e}. "
                 f"Try using fewer pages or closing other applications."
             ) from e
+
+    def _track_gpu_mem(self):
+        if torch.cuda.is_available():
+            self._last_gpu_mem_used = round(torch.cuda.memory_allocated(0) / (1024 ** 3), 2)
+
+    def _record_job(self, file_type: str, page_count: int, char_count: int):
+        self._total_jobs += 1
+        self._total_infer_time += self._last_infer_time
+        self._total_chars += char_count
+        self._history.append({
+            "job_number": self._total_jobs,
+            "file_type": file_type,
+            "pages": page_count,
+            "chars": char_count,
+            "time": round(self._last_infer_time, 2),
+            "gpu_mem_gb": self._last_gpu_mem_used,
+        })
 
     def _unload_model(self):
         if self.model is not None:
@@ -156,9 +195,14 @@ class OCREngine:
             "torch_version": torch.__version__,
             "cuda_version": torch.version.cuda if torch.cuda.is_available() else None,
             "model_loaded": self._loaded,
+            "model_load_time": round(self._load_time, 1),
             "ram_total_gb": round(mem.total / (1024 ** 3), 1),
             "ram_available_gb": round(mem.available / (1024 ** 3), 1),
         }
+        if self.device == "cuda":
+            info["gpu_mem_total_gb"] = round(torch.cuda.get_device_properties(0).total_memory / (1024 ** 3), 1)
+            info["gpu_mem_used_gb"] = round(torch.cuda.memory_allocated(0) / (1024 ** 3), 2)
+            info["gpu_mem_reserved_gb"] = round(torch.cuda.memory_reserved(0) / (1024 ** 3), 2)
         if not info["available"]:
             avail = info["ram_available_gb"]
             if avail < 6:
@@ -172,6 +216,19 @@ class OCREngine:
                     f"You have {avail} GB RAM available."
                 )
         return info
+
+    @property
+    def stats(self) -> dict:
+        avg_time = (self._total_infer_time / self._total_jobs) if self._total_jobs > 0 else 0
+        avg_chars = (self._total_chars / self._total_jobs) if self._total_jobs > 0 else 0
+        return {
+            "total_jobs": self._total_jobs,
+            "total_infer_time": round(self._total_infer_time, 1),
+            "total_chars": self._total_chars,
+            "avg_time": round(avg_time, 1),
+            "avg_chars": round(avg_chars),
+            "history": self._history[-20:],
+        }
 
 
 ocr_engine = OCREngine()

@@ -273,3 +273,81 @@ footer {
     font-family: monospace;
     font-size: 0.9rem;
 }
+
+/* Dashboard Toggle */
+.dashboard-toggle {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1rem;
+}
+.dashboard-toggle .btn {
+    margin-top: 0;
+}
+
+/* Visualization Dashboard */
+#viz-dashboard { display: none; }
+#viz-dashboard.active { display: block; }
+
+.viz-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.viz-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    text-align: center;
+    box-shadow: var(--shadow);
+    transition: transform 0.15s;
+}
+.viz-card:hover { transform: translateY(-2px); }
+
+.viz-card-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+}
+.viz-card-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.2;
+}
+.viz-card-sub {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+}
+
+.viz-bar-track {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    margin: 0.5rem 0 0.2rem;
+    overflow: hidden;
+}
+.viz-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+
+.viz-chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: var(--shadow);
+}
+.viz-chart-card canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+}

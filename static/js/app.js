@@ -176,6 +176,31 @@ document.getElementById('btn-retry').addEventListener('click', () => {
     showView('upload');
 });
 
+// Dashboard
+document.getElementById('btn-dashboard').addEventListener('click', async () => {
+    const dash = document.getElementById('viz-dashboard');
+    const btn = document.getElementById('btn-dashboard');
+    if (dash.classList.contains('active')) {
+        dash.classList.remove('active');
+        btn.textContent = 'System Dashboard';
+        return;
+    }
+    btn.textContent = 'Loading...';
+    try {
+        const [gpuRes, statsRes] = await Promise.all([
+            fetch(API + '/gpu-status'),
+            fetch(API + '/stats'),
+        ]);
+        const gpu = await gpuRes.json();
+        const stats = await statsRes.json();
+        drawDashboard(gpu, stats);
+        dash.classList.add('active');
+        btn.textContent = 'Hide Dashboard';
+    } catch (e) {
+        btn.textContent = 'System Dashboard';
+    }
+});
+
 // Init
 checkGpu();
 initTabs();

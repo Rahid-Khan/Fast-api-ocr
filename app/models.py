@@ -42,11 +42,24 @@ class GpuStatus(BaseModel):
     torch_version: str
     cuda_version: str | None = None
     model_loaded: bool
+    model_load_time: float | None = None
     warning: str | None = None
     ram_total_gb: float | None = None
     ram_available_gb: float | None = None
+    gpu_mem_total_gb: float | None = None
+    gpu_mem_used_gb: float | None = None
+    gpu_mem_reserved_gb: float | None = None
 
 
 class HealthResponse(BaseModel):
     status: str
     gpu: GpuStatus
+
+
+class EngineStats(BaseModel):
+    total_jobs: int
+    total_infer_time: float
+    total_chars: int
+    avg_time: float
+    avg_chars: int
+    history: list[dict]
