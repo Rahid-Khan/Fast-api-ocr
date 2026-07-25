@@ -1,9 +1,12 @@
+import json
+import asyncio
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
 from app.models import JobResponse, JobDetail, JobListResponse, FileType, JobStatus
 from app.database import get_job, list_jobs, count_jobs
 from app.job_manager import remove_job
+from app.ocr_engine import ocr_engine
 
 router = APIRouter()
 
@@ -65,6 +68,23 @@ async def get_job_status(job_id: str):
         created_at=job["created_at"],
         completed_at=job["completed_at"],
     )
+
+
+@router.get("/jobs/{job_id}/stream")
+async def stream_job_output(job_id: str):
+    """Stream OCR output progressively as text chunks via SSE."""
+    async def event_generator():
+        chunk_idx = 0
+        while True:
+            chunks, done = ocr_engine.get_stream_chunks(chunk_idx)
+            for chunk in chunks:
+                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+                chunk_idx += 1
+            if done:
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                break
+            await asyncio.sleep(0.15)
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.delete("/jobs/{job_id}", status_code=204)

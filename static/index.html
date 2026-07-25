@@ -46,17 +46,44 @@
             <button id="btn-start" class="btn btn-primary" disabled>Start OCR</button>
         </section>
 
-        <!-- View: Processing -->
+        <!-- View: Processing (Progressive) -->
         <section id="view-processing" class="view">
-            <div class="processing-card">
-                <div class="spinner"></div>
-                <h2>Processing document...</h2>
-                <div class="progress-bar-track">
-                    <div id="progress-bar-fill" class="progress-bar-fill"></div>
+            <div class="processing-header">
+                <div class="processing-info">
+                    <h2 id="processing-title">Processing...</h2>
+                    <p id="processing-status" class="processing-status-text">Initializing...</p>
+                    <p class="muted">Job: <span id="job-id-display"></span></p>
                 </div>
-                <p id="processing-status">Uploading and initializing OCR engine</p>
-                <p class="muted">Job ID: <span id="job-id-display"></span></p>
-                <p class="muted">Model loads ~15-30s on first run. OCR runs on GPU.</p>
+                <div class="progress-ring-container">
+                    <svg class="progress-ring" viewBox="0 0 80 80">
+                        <circle class="progress-ring-bg" cx="40" cy="40" r="34"/>
+                        <circle id="progress-ring-fill" class="progress-ring-fill" cx="40" cy="40" r="34"/>
+                    </svg>
+                    <span id="progress-percent" class="progress-percent">0%</span>
+                </div>
+            </div>
+
+            <!-- Progressive Output: Split View -->
+            <div class="split-view">
+                <div class="split-panel split-left">
+                    <div class="panel-header">
+                        <span class="panel-label">Original Document</span>
+                    </div>
+                    <div id="doc-preview" class="doc-preview">
+                        <div class="doc-preview-placeholder">Document preview will appear here</div>
+                    </div>
+                </div>
+                <div class="split-divider"></div>
+                <div class="split-panel split-right">
+                    <div class="panel-header">
+                        <span class="panel-label">Extracted Text</span>
+                        <span id="char-counter" class="char-counter">0 chars</span>
+                    </div>
+                    <div id="stream-output" class="stream-output">
+                        <div id="stream-text" class="stream-text"></div>
+                        <span id="stream-cursor" class="stream-cursor hidden"></span>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -106,7 +133,6 @@
                 <button id="btn-delete" class="btn btn-danger">Delete Job</button>
             </div>
 
-            <!-- Job History -->
             <div class="job-history">
                 <h3>Recent Jobs</h3>
                 <div id="job-list" class="job-list"></div>

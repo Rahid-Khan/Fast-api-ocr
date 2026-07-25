@@ -1,7 +1,11 @@
 let currentJobId = null;
 let pollTimer = null;
-let progressTimer = null;
+let progressSource = null;
+let streamSource = null;
 let selectedFile = null;
+let streamText = '';
+let streamIdx = 0;
+let typewriterTimer = null;
 
 const API = '/api';
 
@@ -88,9 +92,21 @@ btnStart.addEventListener('click', async () => {
         const data = await res.json();
         currentJobId = data.id;
         document.getElementById('job-id-display').textContent = currentJobId;
+
+        // Reset streaming state
+        streamText = '';
+        streamIdx = 0;
+        document.getElementById('stream-text').textContent = '';
+        document.getElementById('char-counter').textContent = '0 chars';
+        document.getElementById('stream-cursor').classList.remove('hidden');
+
+        // Show document preview
+        showDocumentPreview(selectedFile);
+
         showView('processing');
-        startPolling();
-        startProgressPolling();
+        startProgressSSE();
+        startStreamSSE();
+        startJobPolling();
     } catch (e) {
         alert('Upload failed: ' + e.message);
         btnStart.disabled = false;
@@ -98,74 +114,178 @@ btnStart.addEventListener('click', async () => {
     }
 });
 
-// Progress polling (real-time engine progress)
-function startProgressPolling() {
-    stopProgressPolling();
-    progressTimer = setInterval(pollProgress, 1000);
-    pollProgress();
+// Document preview
+function showDocumentPreview(file) {
+    const container = document.getElementById('doc-preview');
+    const ext = file.name.split('.').pop().toLowerCase();
+
+    if (['jpg', 'jpeg', 'png', 'bmp', 'tiff', 'tif', 'webp'].includes(ext)) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            container.innerHTML = `<img src="${e.target.result}" alt="Document preview">`;
+        };
+        reader.readAsDataURL(file);
+    } else if (ext === 'pdf') {
+        // Show PDF icon placeholder
+        container.innerHTML = `
+            <div style="text-align:center;padding:2rem;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:64px;height:64px;color:var(--text-muted);margin-bottom:1rem;">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                    <polyline points="14,2 14,8 20,8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10,9 9,9 8,9"/>
+                </svg>
+                <p style="color:var(--text-muted);font-size:0.9rem;">${file.name}</p>
+                <p style="color:var(--text-muted);font-size:0.8rem;">PDF document</p>
+            </div>
+        `;
+    } else {
+        container.innerHTML = `
+            <div style="text-align:center;padding:2rem;">
+                <p style="color:var(--text-muted);font-size:0.9rem;">${file.name}</p>
+                <p style="color:var(--text-muted);font-size:0.8rem;">${ext.toUpperCase()} file</p>
+            </div>
+        `;
+    }
 }
 
-function stopProgressPolling() {
-    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+// Progress ring update
+function updateProgressRing(percent) {
+    const circle = document.getElementById('progress-ring-fill');
+    const label = document.getElementById('progress-percent');
+    if (!circle || !label) return;
+    const circumference = 2 * Math.PI * 34;
+    const offset = circumference - (percent / 100) * circumference;
+    circle.style.strokeDashoffset = offset;
+    label.textContent = Math.round(percent) + '%';
 }
 
-async function pollProgress() {
-    try {
-        const res = await fetch(API + '/progress');
-        const data = await res.json();
+// SSE: Real-time progress
+function startProgressSSE() {
+    stopProgressSSE();
+    progressSource = new EventSource(API + '/progress/stream');
+    progressSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
         const statusEl = document.getElementById('processing-status');
-        const barFill = document.getElementById('progress-bar-fill');
+        const titleEl = document.getElementById('processing-title');
         const stageMap = {
             'idle': 'Waiting...',
-            'loading_model': 'Loading model',
-            'model_ready': 'Model ready',
-            'converting': 'Converting document',
-            'inferring': 'Running OCR inference',
-            'decoding': 'Decoding results',
+            'loading_model': 'Loading Model',
+            'model_ready': 'Model Ready',
+            'converting': 'Converting Document',
+            'inferring': 'Running OCR',
+            'decoding': 'Decoding Output',
             'done': 'Complete',
             'error': 'Error',
         };
         const stageName = stageMap[data.stage] || data.stage;
-        if (data.detail) {
-            statusEl.textContent = `${stageName}: ${data.detail}`;
+        titleEl.textContent = stageName;
+        statusEl.textContent = data.detail || stageName;
+        updateProgressRing(data.percent);
+
+        if (data.stage === 'done' || data.stage === 'error') {
+            stopProgressSSE();
+        }
+    };
+    progressSource.onerror = () => {
+        stopProgressSSE();
+    };
+}
+
+function stopProgressSSE() {
+    if (progressSource) { progressSource.close(); progressSource = null; }
+}
+
+// SSE: Streaming text output
+function startStreamSSE() {
+    stopStreamSSE();
+    streamSource = new EventSource(`${API}/jobs/${currentJobId}/stream`);
+    streamSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'chunk') {
+            streamText += data.text;
+            startTypewriter();
+        } else if (data.type === 'done') {
+            stopStreamSSE();
+            // Finish typewriter
+            finishTypewriter();
+        }
+    };
+    streamSource.onerror = () => {
+        stopStreamSSE();
+    };
+}
+
+function stopStreamSSE() {
+    if (streamSource) { streamSource.close(); streamSource = null; }
+}
+
+// Typewriter effect
+function startTypewriter() {
+    if (typewriterTimer) return;
+    typewriterTimer = setInterval(() => {
+        if (streamIdx < streamText.length) {
+            const chunk = streamText.substring(streamIdx, streamIdx + 3);
+            streamIdx += 3;
+            const el = document.getElementById('stream-text');
+            el.textContent = streamText.substring(0, streamIdx);
+            document.getElementById('char-counter').textContent = streamIdx + ' chars';
+            // Auto-scroll
+            const output = document.getElementById('stream-output');
+            output.scrollTop = output.scrollHeight;
         } else {
-            statusEl.textContent = stageName;
+            clearInterval(typewriterTimer);
+            typewriterTimer = null;
         }
-        if (barFill && data.percent >= 0) {
-            barFill.style.width = data.percent + '%';
-        }
-    } catch (e) { /* ignore */ }
+    }, 15);
+}
+
+function finishTypewriter() {
+    if (typewriterTimer) {
+        clearInterval(typewriterTimer);
+        typewriterTimer = null;
+    }
+    const el = document.getElementById('stream-text');
+    el.textContent = streamText;
+    document.getElementById('char-counter').textContent = streamText.length + ' chars';
+    document.getElementById('stream-cursor').classList.add('hidden');
 }
 
 // Job status polling
-function startPolling() {
-    stopPolling();
+function startJobPolling() {
+    stopJobPolling();
     pollTimer = setInterval(pollStatus, 2000);
     pollStatus();
 }
 
-function stopPolling() {
+function stopJobPolling() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    stopProgressPolling();
 }
 
 async function pollStatus() {
     if (!currentJobId) return;
     try {
         const res = await fetch(`${API}/jobs/${currentJobId}/status`);
-        if (!res.ok) { stopPolling(); return; }
+        if (!res.ok) { stopJobPolling(); return; }
         const data = await res.json();
 
         if (data.status === 'completed') {
-            stopPolling();
-            loadResults();
+            stopJobPolling();
+            stopProgressSSE();
+            stopStreamSSE();
+            finishTypewriter();
+            // Short delay then show final results
+            setTimeout(() => loadResults(), 500);
         } else if (data.status === 'failed') {
-            stopPolling();
+            stopJobPolling();
+            stopProgressSSE();
+            stopStreamSSE();
             document.getElementById('error-message').textContent =
                 data.error_message || 'Unknown error occurred';
             showView('error');
         }
-    } catch (e) { /* retry on next tick */ }
+    } catch (e) { /* retry */ }
 }
 
 async function loadResults() {
@@ -198,6 +318,8 @@ document.getElementById('btn-new').addEventListener('click', () => {
     filePreview.classList.add('hidden');
     btnStart.disabled = true;
     btnStart.textContent = 'Start OCR';
+    stopProgressSSE();
+    stopStreamSSE();
     showView('upload');
 });
 

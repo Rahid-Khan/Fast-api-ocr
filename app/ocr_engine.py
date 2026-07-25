@@ -2,7 +2,7 @@ import gc
 import os
 import time
 import torch
-import psutil
+import threading
 from pathlib import Path
 from transformers import AutoModel, AutoTokenizer
 from app.config import settings
@@ -22,16 +22,29 @@ class OCREngine:
         self._total_chars = 0
         self._history = []
         self._progress = {"stage": "idle", "detail": "", "percent": 0}
+        # Streaming: list of output chunks for progressive display
+        self._stream_chunks = []
+        self._stream_lock = threading.Lock()
+        self._stream_done = False
 
     @property
     def progress(self):
         return self._progress
 
+    def get_stream_chunks(self, since=0):
+        with self._stream_lock:
+            return self._stream_chunks[since:], self._stream_done
+
     def _update_progress(self, stage, detail="", percent=0):
         self._progress = {"stage": stage, "detail": detail, "percent": percent}
         print(f"[Progress] {stage}: {detail} ({percent}%)")
 
+    def _emit_chunk(self, text):
+        with self._stream_lock:
+            self._stream_chunks.append(text)
+
     def _check_memory(self):
+        import psutil
         mem = psutil.virtual_memory()
         available_gb = mem.available / (1024 ** 3)
         if self.device == "cpu" and available_gb < 6:
@@ -86,14 +99,25 @@ class OCREngine:
         self._update_progress("model_ready", f"Model loaded in {self._load_time:.1f}s", 100)
         print(f"[OCREngine] Model loaded in {self._load_time:.1f}s.")
 
+    def _setup_stream(self):
+        with self._stream_lock:
+            self._stream_chunks = []
+            self._stream_done = False
+
+    def _finalize_stream(self, text):
+        with self._stream_lock:
+            if text:
+                self._stream_chunks = [text]
+            self._stream_done = True
+
     def infer_single(self, image_path: str, output_dir: str) -> dict:
         try:
             self.load_model()
             Path(output_dir).mkdir(parents=True, exist_ok=True)
+            self._setup_stream()
 
             self._update_progress("converting", "Preparing image...", 10)
 
-            # Check image exists
             if not Path(image_path).exists():
                 raise FileNotFoundError(f"Image not found: {image_path}")
 
@@ -102,7 +126,6 @@ class OCREngine:
 
             t0 = time.time()
 
-            # Try to capture the model's return value (it may return text directly)
             result_text = None
             try:
                 result_text = self.model.infer(
@@ -118,9 +141,7 @@ class OCREngine:
                     ngram_window=128,
                     save_results=True,
                 )
-            except TypeError as e:
-                # Some versions don't return text
-                print(f"[OCREngine] infer() returned no text (TypeError: {e}), reading output files")
+            except TypeError:
                 self.model.infer(
                     self.tokenizer,
                     prompt="<image>document parsing.",
@@ -139,31 +160,29 @@ class OCREngine:
             self._track_gpu_mem()
             self._update_progress("decoding", "Reading output files...", 80)
 
-            # Read output files
             result = self._read_outputs(output_dir)
 
-            # If no files found, use the direct return value
             if not result["text"] and result_text:
                 text = str(result_text).strip()
                 if text:
                     result["text"] = text
                     result["markdown"] = text
                     result["json"] = text
-                    print(f"[OCREngine] Used direct model output ({len(text)} chars)")
 
-            # Final fallback: if still nothing, try reading raw model output
             if not result["text"]:
                 result["text"] = "(no text output - model produced no results for this image)"
                 result["markdown"] = result["text"]
                 result["json"] = result["text"]
 
-            char_count = len(result.get("text") or "")
+            # Progressive streaming: emit text in chunks
+            full_text = result["text"]
+            self._stream_progressive(full_text)
+
+            char_count = len(full_text)
             self._record_job("single", 1, char_count)
             self._update_progress("done", f"Extracted {char_count} characters", 100)
 
             print(f"[OCREngine] Single OCR complete: {char_count} chars in {self._last_infer_time:.1f}s")
-            print(f"[OCREngine] Output dir contents: {list(Path(output_dir).iterdir())}")
-
             return result
         except (MemoryError, torch.cuda.OutOfMemoryError) as e:
             self._update_progress("error", str(e), 0)
@@ -177,10 +196,10 @@ class OCREngine:
         try:
             self.load_model()
             Path(output_dir).mkdir(parents=True, exist_ok=True)
+            self._setup_stream()
 
             self._update_progress("converting", f"Preparing {len(image_paths)} pages...", 10)
 
-            # Validate all images exist
             for p in image_paths:
                 if not Path(p).exists():
                     raise FileNotFoundError(f"Image not found: {p}")
@@ -190,7 +209,6 @@ class OCREngine:
 
             t0 = time.time()
 
-            # Try to capture the model's return value
             result_text = None
             try:
                 result_text = self.model.infer_multi(
@@ -204,8 +222,7 @@ class OCREngine:
                     ngram_window=1024,
                     save_results=True,
                 )
-            except TypeError as e:
-                print(f"[OCREngine] infer_multi() returned no text (TypeError: {e}), reading output files")
+            except TypeError:
                 self.model.infer_multi(
                     self.tokenizer,
                     prompt="<image>Multi page parsing.",
@@ -222,31 +239,29 @@ class OCREngine:
             self._track_gpu_mem()
             self._update_progress("decoding", "Reading output files...", 80)
 
-            # Read output files
             result = self._read_outputs(output_dir)
 
-            # If no files found, use the direct return value
             if not result["text"] and result_text:
                 text = str(result_text).strip()
                 if text:
                     result["text"] = text
                     result["markdown"] = text
                     result["json"] = text
-                    print(f"[OCREngine] Used direct model output ({len(text)} chars)")
 
-            # Final fallback
             if not result["text"]:
                 result["text"] = "(no text output - model produced no results for these pages)"
                 result["markdown"] = result["text"]
                 result["json"] = result["text"]
 
-            char_count = len(result.get("text") or "")
+            # Progressive streaming: emit text in chunks
+            full_text = result["text"]
+            self._stream_progressive(full_text)
+
+            char_count = len(full_text)
             self._record_job("pdf", len(image_paths), char_count)
             self._update_progress("done", f"Extracted {char_count} characters from {len(image_paths)} pages", 100)
 
             print(f"[OCREngine] Multi OCR complete: {char_count} chars from {len(image_paths)} pages in {self._last_infer_time:.1f}s")
-            print(f"[OCREngine] Output dir contents: {list(Path(output_dir).iterdir())}")
-
             return result
         except (MemoryError, torch.cuda.OutOfMemoryError) as e:
             self._update_progress("error", str(e), 0)
@@ -255,6 +270,23 @@ class OCREngine:
                 f"Out of memory during inference: {e}. "
                 f"Try using fewer pages or closing other applications."
             ) from e
+
+    def _stream_progressive(self, full_text):
+        """Emit text progressively in chunks for streaming display."""
+        if not full_text:
+            self._finalize_stream("")
+            return
+
+        chunk_size = 8
+        i = 0
+        while i < len(full_text):
+            chunk = full_text[i:i + chunk_size]
+            self._emit_chunk(chunk)
+            i += chunk_size
+            # Small delay to make the streaming visible
+            time.sleep(0.02)
+
+        self._finalize_stream(full_text)
 
     def _track_gpu_mem(self):
         if torch.cuda.is_available():
@@ -310,7 +342,6 @@ class OCREngine:
                 except Exception as e:
                     print(f"[OCREngine] Error reading {f}: {e}")
 
-        # Fill missing formats from whatever we have
         base = result["text"] or result["markdown"] or result["json"] or ""
         if not result["text"]:
             result["text"] = base
@@ -323,6 +354,7 @@ class OCREngine:
 
     @property
     def gpu_status(self) -> dict:
+        import psutil
         mem = psutil.virtual_memory()
         info = {
             "available": torch.cuda.is_available(),
